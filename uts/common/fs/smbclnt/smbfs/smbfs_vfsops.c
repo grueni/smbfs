@@ -965,7 +965,11 @@ smbfs_mount_label_policy(vfs_t *vfsp, void *ipaddr, int addr_type, cred_t *cr)
 	/*
 	 * Next, get the assigned label of the remote server.
 	 */
-	tp = find_tpc(ipaddr, addr_type, B_FALSE);
+	/* 
+	 * TODO: don't know the meaning of last arg, since it didn't exists
+         * in opensolaris
+         */
+	tp = find_tpc(ipaddr, addr_type, B_FALSE, 0); 
 	if (tp == NULL)
 		goto out;			/* error getting host entry */
 
