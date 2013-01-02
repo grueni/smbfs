@@ -31,7 +31,7 @@ RM = rm
 
 DEFS = @DEFS@
 CFLAGS = $(DEFS) @CFLAGS@ 
-KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt
+KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt -D_SYSCALL32
 LD_FLAGS = @LD_OPT@
 
 ADD_DRV = /usr/sbin/add_drv
