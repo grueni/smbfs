@@ -1,0 +1,94 @@
+#
+# Copyright (C) 2010 Kazuyoshi Aizawa. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#   notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#   notice, this list of conditions and the following disclaimer in the
+#   documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+#
+CONFIGURE_FILES = Makefile config.status config.cache config.h config.log
+
+CC = @CC@
+LD = ld
+RM = rm
+
+DEFS = @DEFS@
+CFLAGS = $(DEFS) @CFLAGS@ 
+KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt
+LD_FLAGS = @LD_OPT@
+
+ADD_DRV = /usr/sbin/add_drv
+REM_DRV = /usr/sbin/rem_drv
+MOD_UNLOAD = /usr/sbin/modunload
+MOD_LOAD = /usr/sbin/modload
+LN = /usr/bin/ln
+DRV_DIR = @DRV_DIR@
+DRV_CONF_DIR = /usr/kernel/drv
+PRODUCTS = smbfs
+FS_DIR = @FS_DIR@
+CHMOD = /bin/chmod
+DEVFSADM = /usr/sbin/devfsadm
+
+INSTALL = @INSTALL@
+
+all: $(PRODUCTS)
+
+
+smbfs_acl.o: smbfs_acl.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_client.o: smbfs_client.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_node.o: smbfs_node.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_rwlock.o: smbfs_rwlock.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_smb.o: smbfs_smb.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_subr.o: smbfs_subr.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_subr2.o: smbfs_subr2.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_vfsops.o: smbfs_vfsops.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_vnops.o: smbfs_vnops.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+smbfs_xattr.o: smbfs_xattr.c
+	$(CC) -c $(KCFLAGS) $< -o $@
+
+smbfs: smbfs_acl.o smbfs_client.o smbfs_node.o smbfs_rwlock.o smbfs_smb.o smbfs_subr.o smbfs_subr2.o smbfs_vfsops.o smbfs_vnops.o smbfs_xattr.o
+	$(LD) $(LD_FLAGS) -dn -r $^ -o $@
+
+
+install:
+	-$(INSTALL) -m 0644 -o root -g sys smbfs $(FS_DIR) 
+	-$(INSTALL) -m 0644 -o root -g sys smbfs.conf $(DRV_CONF_DIR) 
+
+uninstall:
+	-$(REM_DRV) smbfs
+	-$(RM) ${FS_DIR}/smbfs
+	-$(RM) $(DRV_CONF_DIR)/smbfs.conf
+
+reinstall: uninstall install
+
+clean:
+	-$(RM) -f $(PRODUCTS) *.o
+
+distclean: 
+	-$(RM) -f $(CONFIGURE_FILES)
