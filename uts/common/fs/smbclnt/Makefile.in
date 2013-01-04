@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-CONFIGURE_FILES = Makefile config.status config.cache config.h config.log
+CONFIGURE_FILES = Makefile config.status config.cache config.h config.log autom4te.cache
 
 CC = @CC@
 LD = ld
@@ -31,7 +31,7 @@ RM = rm
 
 DEFS = @DEFS@
 CFLAGS = $(DEFS) @CFLAGS@ 
-KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt -D_SYSCALL32
+KCFLAGS = $(DEFS) @KCFLAGS@
 LD_FLAGS = @LD_OPT@
 
 ADD_DRV = /usr/sbin/add_drv
@@ -41,52 +41,37 @@ MOD_LOAD = /usr/sbin/modload
 LN = /usr/bin/ln
 DRV_DIR = @DRV_DIR@
 DRV_CONF_DIR = /usr/kernel/drv
-PRODUCTS = smbfs
 FS_DIR = @FS_DIR@
 CHMOD = /bin/chmod
 DEVFSADM = /usr/sbin/devfsadm
 
 INSTALL = @INSTALL@
 
-all: $(PRODUCTS)
-
-
-smbfs_acl.o: smbfs_acl.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_client.o: smbfs_client.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_node.o: smbfs_node.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_rwlock.o: smbfs_rwlock.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_smb.o: smbfs_smb.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_subr.o: smbfs_subr.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_subr2.o: smbfs_subr2.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_vfsops.o: smbfs_vfsops.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_vnops.o: smbfs_vnops.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smbfs_xattr.o: smbfs_xattr.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-
-smbfs: smbfs_acl.o smbfs_client.o smbfs_node.o smbfs_rwlock.o smbfs_smb.o smbfs_subr.o smbfs_subr2.o smbfs_vfsops.o smbfs_vnops.o smbfs_xattr.o
-	$(LD) $(LD_FLAGS) -dn -r $^ -o $@
+all:
+	cd netsmb ; make 
+	cd smbfs ; make 
 
 install:
-	-$(INSTALL) -m 0644 -o root -g sys smbfs $(FS_DIR) 
-	modload -p fs/amd64/smbfs
+	cd netsmb ; make install
+	cd smbfs ; make install
 
 uninstall:
-	-modunload.sh
-	-$(RM) ${FS_DIR}/smbfs
+	cd netsmb ; make uninstall
+	cd smbfs ; make uninstall
 
 reinstall: uninstall install
 
 clean:
-	-$(RM) -f $(PRODUCTS) *.o
+	cd netsmb ; make clean
+	cd smbfs ; make clean
 
-distclean: 
-	-$(RM) -f $(CONFIGURE_FILES)
+distclean:
+	cd netsmb ; make distclean
+	cd smbfs ; make distclean
+	-$(RM) -rf $(CONFIGURE_FILES)
+
+logclean:
+	rm -rf logs/*
+
+test:
+	cd smbfs ; make test 
