@@ -73,7 +73,7 @@ smbfs_xattr.o: smbfs_xattr.c
 	$(CC) -c $(KCFLAGS) $< -o $@
 
 smbfs: smbfs_acl.o smbfs_client.o smbfs_node.o smbfs_rwlock.o smbfs_smb.o smbfs_subr.o smbfs_subr2.o smbfs_vfsops.o smbfs_vnops.o smbfs_xattr.o
-	$(LD) $(LD_FLAGS) -dn -r $^ -o $@
+	$(LD) $(LD_FLAGS) -dy -Ndrv/nsmb -r $^  ../../../../../common/smbclnt/smbfs_ntacl.o -o $@
 
 install:
 	-$(INSTALL) -m 0644 -o root -g sys smbfs $(FS_DIR) 

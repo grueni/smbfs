@@ -63,6 +63,17 @@
 #include <sys/fs/smbfs_ioctl.h>
 #include <fs/fs_subr.h>
 
+#include <vm/seg.h>
+#include <vm/page.h>
+#include <vm/pvn.h>
+#include <vm/seg_map.h>
+#include <vm/seg_vn.h>
+#include <vm/hat.h>
+#include <vm/as.h>
+#include <vm/seg_kmem.h>
+
+#include <sys/vmsystm.h>
+
 /*
  * We assign directory offsets like the NFS client, where the
  * offset increments by _one_ after each directory entry.
@@ -174,6 +185,11 @@ static int	smbfs_getsecattr(vnode_t *, vsecattr_t *, int, cred_t *,
 			caller_context_t *);
 static int	smbfs_shrlock(vnode_t *, int, struct shrlock *, int, cred_t *,
 			caller_context_t *);
+static int	smbfs_map(vnode_t *, offset_t, struct as *, caddr_t *, size_t,
+			uchar_t, uchar_t, uint_t, cred_t *, caller_context_t *);
+static int	smbfs_getpage(vnode_t *, offset_t, size_t, uint_t *, struct page **,
+			      size_t, struct seg *, caddr_t, enum seg_rw, cred_t *, caller_context_t *);
+static int	smbfs_putpage(vnode_t *, offset_t, size_t, int, cred_t *, caller_context_t *);
 
 /* Dummy function to use until correct function is ported in */
 int noop_vnodeop() {
@@ -215,9 +231,9 @@ const fs_operation_def_t smbfs_vnodeops_template[] = {
 	{ VOPNAME_FRLOCK,	{ .vop_frlock = smbfs_frlock } },
 	{ VOPNAME_SPACE,	{ .vop_space = smbfs_space } },
 	{ VOPNAME_REALVP,	{ .error = fs_nosys } }, /* smbfs_realvp, */
-	{ VOPNAME_GETPAGE,	{ .error = fs_nosys } }, /* smbfs_getpage, */
-	{ VOPNAME_PUTPAGE,	{ .error = fs_nosys } }, /* smbfs_putpage, */
-	{ VOPNAME_MAP,		{ .error = fs_nosys } }, /* smbfs_map, */
+	{ VOPNAME_GETPAGE,	{ .vop_getpage = smbfs_getpage } }, 
+	{ VOPNAME_PUTPAGE,	{ .vop_putpage = smbfs_putpage } }, 
+	{ VOPNAME_MAP,		{ .vop_map = smbfs_map } }, 
 	{ VOPNAME_ADDMAP,	{ .error = fs_nosys } }, /* smbfs_addmap, */
 	{ VOPNAME_DELMAP,	{ .error = fs_nosys } }, /* smbfs_delmap, */
 	{ VOPNAME_DUMP,		{ .error = fs_nosys } }, /* smbfs_dump, */
@@ -3109,4 +3125,92 @@ smbfs_shrlock(vnode_t *vp, int cmd, struct shrlock *shr, int flag, cred_t *cr,
 		return (fs_shrlock(vp, cmd, shr, flag, cr, ct));
 	else
 		return (ENOSYS);
+}
+
+/*
+ * MAP vnode operation
+ */
+static int
+smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
+        uchar_t prot, uchar_t maxprot, uint_t flags, cred_t *cr, caller_context_t *ct)
+{
+    struct segvn_crargs vn_a;
+    int err;
+
+    cmn_err(CE_CONT, "smbfs_map called 2");
+
+    if (vp->v_flag & VNOMAP){
+        err = ENOSYS;
+        goto out;
+    }
+ 
+    if (off < 0 || off + len < 0){
+        err = ENXIO;
+        goto out;
+    }
+ 
+    if (vp->v_type != VREG){
+        err = ENODEV;
+        goto out;
+    }
+ 
+    if (vp->v_flag & VNOCACHE) {
+        err = EAGAIN;
+        goto out;
+    }
+ 
+    as_rangelock(as);
+#ifdef SOL11
+    /* Solairs 10 doesn't have this kernel function */
+    err = choose_addr(as, addrp, len, off, ADDR_VACALIGN, flags);
+    if (err) {
+        as_rangeunlock(as);
+        goto out;
+    }
+#endif    
+ 
+    vn_a.vp = vp;
+    vn_a.offset = off;
+    vn_a.type = (flags & MAP_TYPE);
+    vn_a.prot = (uchar_t)prot;
+    vn_a.maxprot = (uchar_t)maxprot;
+    vn_a.flags = (flags & ~MAP_TYPE);
+    vn_a.cred = cr;
+    vn_a.amp = NULL;
+    vn_a.szc = 0;
+    vn_a.lgrp_mem_policy_flags = 0;
+
+    err  = as_map(as, *addrp, len, segvn_create, &vn_a);
+    as_rangeunlock(as);
+    cmn_err(CE_CONT, "as_map returns with %d", err);
+ 
+  out:
+    return (err);
+}
+
+/*
+ * smbfs_getpage
+ * GETPAGE VNODE operation
+ */
+int
+smbfs_getpage(vnode_t *vp, offset_t off, size_t len, uint_t *protp,
+        struct page **plarr, size_t plsz, struct seg *seg, caddr_t addr,
+        enum seg_rw rw, cred_t *cr, caller_context_t *ct)
+{
+  SMBVDEBUG("smbfs_getpage called");
+  cmn_err(CE_CONT, "smbfs_getpage called");
+  return (ENOTSUP);
+}
+
+/* 
+ * smbfs_putpage 
+ * PUTPAGE VNODE operation
+ */
+int
+smbfs_putpage(vnode_t *vp, offset_t off, size_t len, int flags, cred_t *cr
+	      , caller_context_t *ct)
+{
+  SMBVDEBUG("smbfs_putpage called");
+  cmn_err(CE_CONT, "smbfs_putpage called");
+  return (ENOTSUP);
 }

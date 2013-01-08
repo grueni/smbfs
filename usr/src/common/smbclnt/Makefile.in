@@ -31,7 +31,7 @@ RM = rm
 
 DEFS = @DEFS@
 CFLAGS = $(DEFS) @CFLAGS@ 
-KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt -D_SYSCALL32
+KCFLAGS = $(DEFS) @KCFLAGS@ -I../../../ -I../ -I../../../smbclnt -I../../uts/common -D_SYSCALL32
 LD_FLAGS = @LD_OPT@
 
 ADD_DRV = /usr/sbin/add_drv
@@ -41,7 +41,7 @@ MOD_LOAD = /usr/sbin/modload
 LN = /usr/bin/ln
 DRV_DIR = @DRV_DIR@
 DRV_CONF_DIR = /usr/kernel/drv
-PRODUCTS = nsmb 
+PRODUCTS = smbfs_ntacl.o
 FS_DIR = @FS_DIR@
 CHMOD = /bin/chmod
 DEVFSADM = /usr/sbin/devfsadm
@@ -50,47 +50,9 @@ INSTALL = @INSTALL@
 
 all: $(PRODUCTS)
 
-smb_conn.o: smb_conn.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_dev.o: smb_dev.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_iod.o: smb_iod.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_pass.o: smb_pass.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_rq.o: smb_rq.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_sign.o: smb_sign.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_smb.o: smb_smb.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_subrs.o: smb_subrs.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_time.o: smb_time.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_tran.o: smb_tran.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_trantcp.o: smb_trantcp.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-smb_usr.o: smb_usr.c
-	$(CC) -c $(KCFLAGS) $< -o $@
-subr_mchain.o: subr_mchain.c
-	$(CC) -c $(KCFLAGS) $< -o $@
 
-nsmb: smb_conn.o smb_dev.o smb_iod.o smb_pass.o smb_rq.o smb_sign.o smb_smb.o smb_subrs.o smb_time.o smb_tran.o smb_trantcp.o smb_usr.o subr_mchain.o
-	$(LD) $(LD_FLAGS) -dy -Ncrypto/md4 -Ncrypto/md5 -Nmisc/tlimod -r $^ -o $@
-
-install:
-	-$(INSTALL) -m 0644 -o root -g sys nsmb.conf $(DRV_CONF_DIR)
-	-$(INSTALL) -m 0644 -o root -g sys nsmb $(DRV_DIR) 
-	-$(ADD_DRV) nsmb 
-
-uninstall:
-	-$(REM_DRV) nsmb 
-	-$(RM) ${DRV_DIR}/nsmb
-	-$(RM) $(DRV_CONF_DIR)/nsmb.conf
-
-reinstall: uninstall install
+smbfs_ntacl.o: smbfs_ntacl.c 
+	$(CC) -c $(KCFLAGS) $< -o $@
 
 clean:
 	-$(RM) -f $(PRODUCTS) *.o

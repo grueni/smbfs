@@ -49,6 +49,7 @@ INSTALL = @INSTALL@
 
 all:
 	cd netsmb ; make 
+	cd ../../../../common/smbclnt ; make
 	cd smbfs ; make 
 
 install:
@@ -64,14 +65,13 @@ reinstall: uninstall install
 clean:
 	cd netsmb ; make clean
 	cd smbfs ; make clean
+	cd ../../../../common/smbclnt ; make clean
 
 distclean:
 	cd netsmb ; make distclean
 	cd smbfs ; make distclean
+	cd ../../../../common/smbclnt ; make distclean 
 	-$(RM) -rf $(CONFIGURE_FILES)
 
 logclean:
 	rm -rf logs/*
-
-test:
-	cd smbfs ; make test 

@@ -72,7 +72,7 @@ case $KARCH in
 	DRV_DIR="/usr/kernel/drv/amd64"
 	if test -n "$IS_GNU_LD";
 	then
-		LD_OPT="-melf_x86_64"
+		LD_OPT="-melf_x86_64_sol2"
 	fi
 	FS_DIR="/usr/kernel/fs/amd64"
 	;;
@@ -92,5 +92,5 @@ AC_SUBST(CC)
 AC_SUBST(CXX)
 AC_SUBST(PTHREAD_CFLAGS)
 
-AC_CONFIG_FILES([Makefile netsmb/Makefile smbfs/Makefile])
+AC_CONFIG_FILES([Makefile netsmb/Makefile smbfs/Makefile ../../../../common/smbclnt/Makefile])
 AC_OUTPUT

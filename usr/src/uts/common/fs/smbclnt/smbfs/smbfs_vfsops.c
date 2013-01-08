@@ -170,11 +170,11 @@ _init(void)
 	/*
 	 * Check compiled-in version of "nsmb"
 	 * that we're linked with.  (paranoid)
-	 */
 	if (nsmb_version != NSMB_VERSION) {
 		cmn_err(CE_WARN, "_init: nsmb version mismatch");
 		return (ENOTTY);
 	}
+	 */
 
 	smbfs_mountcount = 0;
 

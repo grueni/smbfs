@@ -3052,7 +3052,7 @@ case $KARCH in
 	DRV_DIR="/usr/kernel/drv/amd64"
 	if test -n "$IS_GNU_LD";
 	then
-		LD_OPT="-melf_x86_64"
+		LD_OPT="-melf_x86_64_sol2"
 	fi
 	FS_DIR="/usr/kernel/fs/amd64"
 	;;
@@ -3075,7 +3075,7 @@ fi
 
 
 
-ac_config_files="$ac_config_files Makefile netsmb/Makefile smbfs/Makefile"
+ac_config_files="$ac_config_files Makefile netsmb/Makefile smbfs/Makefile ../../../../common/smbclnt/Makefile"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -3798,6 +3798,7 @@ do
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "netsmb/Makefile") CONFIG_FILES="$CONFIG_FILES netsmb/Makefile" ;;
     "smbfs/Makefile") CONFIG_FILES="$CONFIG_FILES smbfs/Makefile" ;;
+    "../../../../common/smbclnt/Makefile") CONFIG_FILES="$CONFIG_FILES ../../../../common/smbclnt/Makefile" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
