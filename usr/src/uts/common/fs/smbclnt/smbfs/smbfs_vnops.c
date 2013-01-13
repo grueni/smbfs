@@ -3623,7 +3623,7 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
         iov.iov_len = bp->b_bcount;
         uio.uio_iov = &iov;
         uio.uio_iovcnt = 1;
-        uio.uio_loffset = 0;
+        uio.uio_loffset = off;
         uio.uio_segflg = UIO_SYSSPACE;
         uio.uio_resid = bp->b_bcount;
         uio.uio_fmode = 0;
@@ -3859,7 +3859,7 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
         iov.iov_len = bp->b_bcount;
         uio.uio_iov = &iov;
         uio.uio_iovcnt = 1;
-        uio.uio_loffset = 0;
+        uio.uio_loffset = io_off;
         uio.uio_segflg = UIO_SYSSPACE;
         uio.uio_resid = bp->b_bcount;
         uio.uio_fmode = 0;
