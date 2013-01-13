@@ -130,7 +130,6 @@ static int	smbfs_accessx(void *, int, cred_t *);
 static int	smbfs_readvdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 			caller_context_t *);
 static void	smbfs_rele_fid(smbnode_t *, struct smb_cred *);
-static void	debug_print(int , char *, ...);
 
 /*
  * These are the vnode ops routines which implement the vnode interface to
@@ -256,7 +255,7 @@ const fs_operation_def_t smbfs_vnodeops_template[] = {
 	{ VOPNAME_SETSECATTR,	{ .vop_setsecattr = smbfs_setsecattr } },
 	{ VOPNAME_GETSECATTR,	{ .vop_getsecattr = smbfs_getsecattr } },
 	{ VOPNAME_SHRLOCK,	{ .vop_shrlock = smbfs_shrlock } },
-	{ NULL, NULL }
+	{ NULL, {NULL} }
 };
 
 /*
@@ -651,7 +650,7 @@ smbfs_read(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 
 	/* get vnode attributes from server */
 	va.va_mask = AT_SIZE | AT_MTIME;
-	if (error = smbfsgetattr(vp, &va, cr))
+	if ((error = smbfsgetattr(vp, &va, cr)))
 		return (error);
 
 	/* Update mtime with mtime from server here? */
@@ -825,7 +824,7 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 		 * File size can be changed by another client
 		 */
 		va.va_mask = AT_SIZE;
-		if (error = smbfsgetattr(vp, &va, cr))
+		if ((error = smbfsgetattr(vp, &va, cr)))
 			return (error);
 		uiop->uio_loffset = va.va_size;
 	}
@@ -1512,8 +1511,8 @@ smbfs_access_rwx(vfs_t *vfsp, int vtype, int mode, cred_t *cr)
 	    (vnode_t *)&tmpl_vdir :
 	    (vnode_t *)&tmpl_vreg;
 
-	return (secpolicy_vnode_access2(cr, tvp, va.va_uid,
-	    va.va_mode << shift, mode));
+	mode &= (va.va_mode << shift);
+	return (secpolicy_vnode_access_nm(cr, tvp, "", va.va_uid, mode));
 }
 
 /*
@@ -3373,7 +3372,7 @@ smbfs_setsecattr(vnode_t *vp, vsecattr_t *vsa, int flag, cred_t *cr,
 	 * Allow only the mount owner to do this.
 	 * See comments at smbfs_access_rwx.
 	 */
-	error = secpolicy_vnode_setdac(cr, smi->smi_uid);
+	error = secpolicy_vnode_setdac_vp(cr, vp, smi->smi_uid);
 	if (error != 0)
 		return (error);
 
@@ -3413,7 +3412,7 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
     struct segvn_crargs vn_a;
     int err;
 
-    cmn_err(CE_CONT, "smbfs_map called 2");
+    DEBUG_PRINT((CE_CONT, "smbfs_map is called\n"));    
 
     if (vp->v_flag & VNOMAP){
         err = ENOSYS;
@@ -3690,10 +3689,6 @@ int
 smbfs_putpage(vnode_t *vp, offset_t off, size_t len, int flags, cred_t *cr
 	      , caller_context_t *ct)
 {
-    SMBVDEBUG("smbfs_putpage called");
-    cmn_err(CE_CONT, "smbfs_putpage called");
-    return (ENOTSUP);
-
     u_offset_t preloff = 0; // relative offset within page
     u_offset_t poff; // offset for loop operaton
     size_t psz = 0; // requested size within page
@@ -3966,6 +3961,7 @@ smbfs_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr, size_t len,
     return (0);        
 }
 
+#ifdef DEBUG
 /*
  * bebug_print
  *
@@ -3986,3 +3982,4 @@ debug_print(int level, char *format, ...)
     va_end(ap);
     cmn_err(level, "%s", buf);
 }
+#endif
