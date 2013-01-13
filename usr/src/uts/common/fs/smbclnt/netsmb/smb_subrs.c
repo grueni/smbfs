@@ -57,6 +57,11 @@
 #include <netsmb/smb_rq.h>
 #include <netsmb/smb_subr.h>
 
+#ifdef SOL11
+#include <sys/vfs_opreg.h>
+#include <stdarg.h>
+#endif
+
 /*
  * XXX:This conversion might not be fully MS-Compatible
  * for calculating hashes. The output length may differ
