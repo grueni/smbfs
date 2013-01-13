@@ -184,7 +184,7 @@ typedef struct smbmntinfo {
 #define MAX_MSG         256     // Max chara for SYSLOG 
 
 #ifdef DEBUG
-static void	debug_print(int , char *, ...);
+void	debug_print(int , char *, ...);
 #define  DEBUG_PRINT(args)  debug_print args
 #else
 #define DEBUG_PRINT(args)

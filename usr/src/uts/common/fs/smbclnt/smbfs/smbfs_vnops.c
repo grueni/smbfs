@@ -792,6 +792,9 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	int		pagecreateva = 0; // if new page created using page_create_va()
 	uint_t		flags = 0;
 
+        DEBUG_PRINT((CE_CONT, "smbfs_write is called\n"));
+        DEBUG_PRINT((CE_CONT, "smbfs_write: vnode=%p", vp));
+        
 	np = VTOSMB(vp);
 	smi = VTOSMI(vp);
 	ssp = smi->smi_share;
@@ -1050,8 +1053,7 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
              * segmap_release wont' be back until smbfs_putpage get completed.
              * (Async write)
              */
-            //flags |= SM_WRITE; // force write back
-            flags = 0;
+            flags |= SM_WRITE; // force write back
             DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_release\n"));        
             error = segmap_release(segkmap, base, flags);
             if (error != 0) {
@@ -1063,6 +1065,7 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 
 	/* undo adjustment of resid */
 	uiop->uio_resid += past_limit;
+        DEBUG_PRINT((CE_CONT, "smbfs_write: file size was adjusted to %ld\n", np->r_size));        
 
 	return (error);
 }
@@ -1511,8 +1514,17 @@ smbfs_access_rwx(vfs_t *vfsp, int vtype, int mode, cred_t *cr)
 	    (vnode_t *)&tmpl_vdir :
 	    (vnode_t *)&tmpl_vreg;
 
-	mode &= (va.va_mode << shift);
-	return (secpolicy_vnode_access_nm(cr, tvp, "", va.va_uid, mode));
+        /**
+         * secpolicy_vnode_access2 has not been expored already, and it 
+         * exists just for compatibility.(See /usr/include/sys/policy.h)
+         * secpolicy_vnode_access_nm should be used instead, but not work now.
+         * maybe usage is wrong.(no much information available..)
+         * 
+         mode |= (va.va_mode << shift);
+         return (secpolicy_vnode_access_nm(cr, tvp, "", va.va_uid, mode));
+ 	*/
+        
+	return (secpolicy_vnode_access2(cr, tvp, va.va_uid, va.va_mode << shift, mode));        
 }
 
 /*
@@ -3787,7 +3799,9 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
 
     np = VTOSMB(vp);
     smi = VTOSMI(vp);    
-    ssp = smi->smi_share;    
+    ssp = smi->smi_share;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_putapage: np->r_size=%ld", np->r_size));    
 
     do {
         /*
@@ -3813,7 +3827,7 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
                  */
                 io_off = np->r_size;
                 DEBUG_PRINT((CE_WARN, " smbfs_putapage: io_ff=%" PRId64 " greater than fsize=%" PRId64 "\n", io_off, np->r_size));
-            } 
+            }
             io_len = np->r_size - io_off;
             DEBUG_PRINT((CE_CONT, "smbfs_putapage: shorten io_len to %ld\n", io_len));
         }
@@ -3825,9 +3839,10 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
 
         /*
          * assign and initialize buf structure. 
-         *   ..bp->b_bcount = io_len;
-         *   ..bp->b_bufsize = io_len;
-         *   ..bp->b_vp = vp など。
+         *   bp->b_bcount = io_len;
+         *   bp->b_bufsize = io_len;
+         *   bp->b_vp = vp
+         *   ...etc
          */
         bp = pageio_setup(pp, io_len, vp, B_WRITE | flags);
 
@@ -3858,7 +3873,11 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
         uio.uio_segflg = UIO_SYSSPACE;
         uio.uio_resid = bp->b_bcount;
         uio.uio_fmode = 0;
-        uio.uio_extflg = UIO_COPY_CACHED;        
+        uio.uio_extflg = UIO_COPY_CACHED;
+
+        endoff = uio.uio_loffset + uio.uio_resid;
+
+        DEBUG_PRINT((CE_CONT, "smbfs_putapage: uio_loffset=%ld, uio_resid=%ld", uio.uio_loffset, uio.uio_resid));
 
 	/* Timeout: longer for append. */
 	timo = smb_timo_write;
@@ -3877,7 +3896,7 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
             error = ESTALE;
         } else {
             /*
-             * submit read request to smb driver
+             * submit write request to smb driver
              */
             error = smb_rwuio(ssp, np->n_fid, UIO_WRITE,
                               &uio, &scred, timo);
@@ -3886,16 +3905,18 @@ smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
 	if (error == 0) {
 		mutex_enter(&np->r_statelock);
 		np->n_flag |= (NFLUSHWIRE | NATTRCHANGED);
-		if ((&uio)->uio_loffset > (offset_t)np->r_size)
-		  np->r_size = (len_t)(&uio)->uio_loffset;
+		if (uio.uio_loffset > (offset_t)np->r_size)
+		  np->r_size = (len_t)uio.uio_loffset;
 		mutex_exit(&np->r_statelock);
 		/*
 		 * need to call smbfs_smb_flush here?
+		 */
+                /*
 		if (ioflag & (FSYNC|FDSYNC)) {
-			// Don't error the I/O if this fails. 
-			(void) smbfs_smb_flush(np, &scred);
+                    // Don't error the I/O if this fails. 
+                    (void) smbfs_smb_flush(np, &scred);
 		}
-	        */
+		*/
 	} 
 
 	smb_credrele(&scred);
