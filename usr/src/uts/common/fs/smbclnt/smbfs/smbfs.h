@@ -184,9 +184,27 @@ typedef struct smbmntinfo {
 #define MAX_MSG         256     // Max chara for SYSLOG 
 
 #ifdef DEBUG
+static void	debug_print(int , char *, ...);
 #define  DEBUG_PRINT(args)  debug_print args
 #else
 #define DEBUG_PRINT(args)
 #endif
+
+/*
+ * STRUCT_HANDLE is originally defined in /usr/include/sys/model.h.
+ * To reduce a warning when compiling smbfs_vfsops.c using gcc, put
+ * NULL in branckets. (may not necessary)
+ */ 
+#ifdef STRUCT_HANDLE
+#undef STRUCT_HANDLE
+#define STRUCT_HANDLE(struct_type, handle)                              \
+        struct {                                                        \
+                union {                                                 \
+                        struct struct_type##32  *m32;                   \
+                        struct struct_type      *m64;                   \
+                }       ptr;                                            \
+                model_t model;                                          \
+        } handle = { { NULL }, DATAMODEL_ILP32 }
+#endif              
 
 #endif	/* _SMBFS_SMBFS_H */
