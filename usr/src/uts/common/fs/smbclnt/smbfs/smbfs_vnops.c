@@ -36,6 +36,14 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copright (c) 2013  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
+ * All rights reserved.
+ *
+ * implemented smbfs_map, smbfs_getpage, smbfs_putpage, smbfs_delmap, smbfs_addmap.
+ * So that smbfs can run executable file on file system.
+ */
+
 #include <sys/systm.h>
 #include <sys/cred.h>
 #include <sys/vnode.h>
@@ -3469,9 +3477,9 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
 
     err  = as_map(as, *addrp, len, segvn_create, &vn_a);
     as_rangeunlock(as);
-    cmn_err(CE_CONT, "as_map returns with %d", err);
  
   out:
+    DEBUG_PRINT((CE_CONT, "smbfs_map: return(%d)\n", error));        
     return (err);
 }
 
