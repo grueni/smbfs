@@ -126,7 +126,10 @@ static struct modlfs modlfs = {
 };
 
 static struct modlinkage modlinkage = {
-	MODREV_1, (void *)&modlfs, NULL
+    MODREV_1, {
+        (void *)&modlfs,
+        NULL
+    }    
 };
 
 /*
@@ -267,7 +270,7 @@ static const fs_operation_def_t smbfs_vfsops_template[] = {
 	{ VFSNAME_VGET,	{ .error = fs_nosys } },
 	{ VFSNAME_MOUNTROOT, { .error = fs_nosys } },
 	{ VFSNAME_FREEVFS, { .vfs_freevfs = smbfs_freevfs } },
-	{ NULL, NULL }
+	{ NULL, {NULL}}
 };
 
 int

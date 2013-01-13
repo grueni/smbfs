@@ -2470,7 +2470,7 @@ smbfs_smb_findnext(struct smbfs_fctx *ctx, int limit, struct smb_cred *scrp)
 int
 smbfs_smb_findclose(struct smbfs_fctx *ctx, struct smb_cred *scrp)
 {
-	int error;
+	int error = 0;
 
 	ctx->f_scred = scrp;
 	switch (ctx->f_type) {

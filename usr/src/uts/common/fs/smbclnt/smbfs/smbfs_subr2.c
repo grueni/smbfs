@@ -219,7 +219,7 @@ smbfs_node_findcreate(
 	int rplen;
 	smbnode_t *np;
 	vnode_t *vp;
-	int newnode;
+	int newnode = 0;
 
 	/*
 	 * Build the search string, either in tmpbuf or
