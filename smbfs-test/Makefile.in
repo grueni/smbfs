@@ -23,51 +23,37 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-CONFIGURE_FILES = Makefile config.status config.cache config.h config.log autom4te.cache
+
+CONFIGURE_FILES = Makefile config.status config.cache config.h config.log
 
 CC = @CC@
+CPP = @CXX@
 LD = ld
 RM = rm
 
 DEFS = @DEFS@
-CFLAGS = $(DEFS) @CFLAGS@ 
-KCFLAGS = $(DEFS) @KCFLAGS@
-LD_FLAGS = @LD_OPT@
+CFLAGS = $(DEFS) @CFLAGS@  -I ../kernel @PTHREAD_CFLAGS@
 
-ADD_DRV = /usr/sbin/add_drv
-REM_DRV = /usr/sbin/rem_drv
-MOD_UNLOAD = /usr/sbin/modunload
-MOD_LOAD = /usr/sbin/modload
-LN = /usr/bin/ln
-DRV_DIR = @DRV_DIR@
-DRV_CONF_DIR = /usr/kernel/drv
-FS_DIR = @FS_DIR@
-CHMOD = /bin/chmod
-DEVFSADM = /usr/sbin/devfsadm
+PRODUCTS = fstest readtest writetest
 
 INSTALL = @INSTALL@
 
-all:
-	cd usr/src/uts/common/fs/smbclnt/smbfs ; make 
-	cd smbfs-test ; make
+all: $(PRODUCTS)
 
-install:
-	cd usr/src/uts/common/fs/smbclnt/smbfs ; make install
+fstest : fstest.cpp 
+	-$(CPP)  -g -O2 -Wall -DSOL11 -DSOL10  -I ../kernel -pthreads fstest.cpp -o fstest
 
-uninstall:
-	cd usr/src/uts/common/fs/smbclnt/smbfs ; make uninstall
+writetest : writetest.c 
+	-$(CC) $(CFLAGS) writetest.c -o $@
 
-reinstall: uninstall install
+readtest : readtest.c 
+	-$(CC) $(CFLAGS) readtest.c -o $@
 
 clean:
-	cd usr/src/uts/common/fs/smbclnt/smbfs ; make clean
+	-$(RM) -f $(PRODUCTS) 
 
 distclean:
-	cd usr/src/uts/common/fs/smbclnt/smbfs ; make distclean
-	-$(RM) -rf $(CONFIGURE_FILES)
-
-logclean:
-	rm -rf logs/*
+	-$(RM) -f $(CONFIGURE_FILES)
 
 test:
-	cd smbfs-test; ./test.sh
+	./test.sh

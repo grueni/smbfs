@@ -93,5 +93,5 @@ AC_SUBST(CXX)
 AC_SUBST(PTHREAD_CFLAGS)
 
 AC_CONFIG_FILES([Makefile usr/src/uts/common/fs/smbclnt/netsmb/Makefile \
-usr/src/uts/common/fs/smbclnt/smbfs/Makefile usr/src/common/smbclnt/Makefile])
+usr/src/uts/common/fs/smbclnt/smbfs/Makefile usr/src/common/smbclnt/Makefile smbfs-test/Makefile])
 AC_OUTPUT
