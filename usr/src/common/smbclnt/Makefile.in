@@ -55,7 +55,8 @@ smbfs_ntacl.o: smbfs_ntacl.c
 	$(CC) -c $(KCFLAGS) $< -o $@
 
 clean:
-	-$(RM) -f $(PRODUCTS) *.o
+	-$(RM) -f $(PRODUCTS)
 
 distclean: 
 	-$(RM) -f $(CONFIGURE_FILES)
+

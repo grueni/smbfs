@@ -45,11 +45,11 @@ PRODUCTS = smbfs
 FS_DIR = @FS_DIR@
 CHMOD = /bin/chmod
 DEVFSADM = /usr/sbin/devfsadm
-
 INSTALL = @INSTALL@
+OBJS = smbfs_acl.o smbfs_client.o smbfs_node.o smbfs_rwlock.o smbfs_smb.o smbfs_subr.o smbfs_subr2.o smbfs_vfsops.o smbfs_vnops.o smbfs_xattr.o
+SMBCLNTDIR = ../../../../../common/smbclnt
 
 all: $(PRODUCTS)
-
 
 smbfs_acl.o: smbfs_acl.c
 	$(CC) -c $(KCFLAGS) $< -o $@
@@ -71,9 +71,11 @@ smbfs_vnops.o: smbfs_vnops.c
 	$(CC) -c $(KCFLAGS) $< -o $@
 smbfs_xattr.o: smbfs_xattr.c
 	$(CC) -c $(KCFLAGS) $< -o $@
+$(SMBCLNTDIR)/smbfs_ntacl.o:
+	cd $(SMBCLNTDIR) ; make
 
-smbfs: smbfs_acl.o smbfs_client.o smbfs_node.o smbfs_rwlock.o smbfs_smb.o smbfs_subr.o smbfs_subr2.o smbfs_vfsops.o smbfs_vnops.o smbfs_xattr.o
-	$(LD) $(LD_FLAGS) -dy -Ndrv/nsmb -r $^  ../../../../../common/smbclnt/smbfs_ntacl.o -o $@
+smbfs: $(OBJS) $(SMBCLNTDIR)/smbfs_ntacl.o
+	$(LD) $(LD_FLAGS) -dy -Ndrv/nsmb -r $^ -o $@
 
 install:
 	-$(INSTALL) -m 0644 -o root -g sys smbfs $(FS_DIR) 
@@ -86,7 +88,9 @@ uninstall:
 reinstall: uninstall install
 
 clean:
-	-$(RM) -f $(PRODUCTS) *.o
+	-$(RM) -f $(PRODUCTS) $(OBJS) 
+	cd $(SMBCLNTDIR) ; make clean
 
 distclean: 
 	-$(RM) -f $(CONFIGURE_FILES)
+	cd $(SMBCLNTDIR) ; make distclean

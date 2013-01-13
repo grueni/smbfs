@@ -1,4 +1,4 @@
-AC_INIT([smbfs], [0.1.0], [admin2@whiteboard.ne.jp])
+AC_INIT([smbfs], [1.0.0], [admin2@whiteboard.ne.jp])
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_INSTALL
@@ -23,7 +23,7 @@ fi
 IS_GNU_LD=`ld --version 2>&1 | grep  GNU`
 
 if test "$GCC" = yes; then
-	CFLAGS="$CFLAGS -Wall"
+	CFLAGS="$CFLAGS -Wall -Wno-unknown-pragmas"
 	PTHREAD_CFLAGS="-pthreads"
         GCC_VERSION=`gcc -v 2>&1 |grep "gcc version" | awk '{print $3}'`
         GCC_MAJOR_VERSION=`echo $GCC_VERSION | cut -f 1 -d .`
@@ -92,5 +92,6 @@ AC_SUBST(CC)
 AC_SUBST(CXX)
 AC_SUBST(PTHREAD_CFLAGS)
 
-AC_CONFIG_FILES([Makefile netsmb/Makefile smbfs/Makefile ../../../../common/smbclnt/Makefile])
+AC_CONFIG_FILES([Makefile usr/src/uts/common/fs/smbclnt/netsmb/Makefile \
+usr/src/uts/common/fs/smbclnt/smbfs/Makefile usr/src/common/smbclnt/Makefile])
 AC_OUTPUT

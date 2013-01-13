@@ -48,29 +48,21 @@ DEVFSADM = /usr/sbin/devfsadm
 INSTALL = @INSTALL@
 
 all:
-#	cd netsmb ; make 
-	cd ../../../../common/smbclnt ; make
-	cd smbfs ; make 
+	cd usr/src/uts/common/fs/smbclnt/smbfs ; make 
 
 install:
-#	cd netsmb ; make install
-	cd smbfs ; make install
+	cd usr/src/uts/common/fs/smbclnt/smbfs ; make install
 
 uninstall:
-#	cd netsmb ; make uninstall
-	cd smbfs ; make uninstall
+	cd usr/src/uts/common/fs/smbclnt/smbfs ; make uninstall
 
 reinstall: uninstall install
 
 clean:
-#	cd netsmb ; make clean
-	cd smbfs ; make clean
-	cd ../../../../common/smbclnt ; make clean
+	cd usr/src/uts/common/fs/smbclnt/smbfs ; make clean
 
 distclean:
-#	cd netsmb ; make distclean
-	cd smbfs ; make distclean
-	cd ../../../../common/smbclnt ; make distclean 
+	cd usr/src/uts/common/fs/smbclnt/smbfs ; make distclean
 	-$(RM) -rf $(CONFIGURE_FILES)
 
 logclean:

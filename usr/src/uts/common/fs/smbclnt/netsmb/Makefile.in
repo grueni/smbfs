@@ -45,6 +45,7 @@ PRODUCTS = nsmb
 FS_DIR = @FS_DIR@
 CHMOD = /bin/chmod
 DEVFSADM = /usr/sbin/devfsadm
+OBJS = smb_conn.o smb_dev.o smb_iod.o smb_pass.o smb_rq.o smb_sign.o smb_smb.o smb_subrs.o smb_time.o smb_tran.o smb_trantcp.o smb_usr.o subr_mchain.o
 
 INSTALL = @INSTALL@
 
@@ -77,7 +78,7 @@ smb_usr.o: smb_usr.c
 subr_mchain.o: subr_mchain.c
 	$(CC) -c $(KCFLAGS) $< -o $@
 
-nsmb: smb_conn.o smb_dev.o smb_iod.o smb_pass.o smb_rq.o smb_sign.o smb_smb.o smb_subrs.o smb_time.o smb_tran.o smb_trantcp.o smb_usr.o subr_mchain.o
+nsmb: $(OBJS)
 	$(LD) $(LD_FLAGS) -dy -Ncrypto/md4 -Ncrypto/md5 -Nmisc/tlimod -r $^ -o $@
 
 install:
@@ -93,7 +94,7 @@ uninstall:
 reinstall: uninstall install
 
 clean:
-	-$(RM) -f $(PRODUCTS) *.o
+	-$(RM) -f $(PRODUCTS) $(OBJS)
 
 distclean: 
 	-$(RM) -f $(CONFIGURE_FILES)
