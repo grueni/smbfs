@@ -181,4 +181,12 @@ typedef struct smbmntinfo {
 #define	VFTOSMI(vfsp)	((smbmntinfo_t *)((vfsp)->vfs_data))
 #define	SMBINTR(vp)	(VTOSMI(vp)->smi_flags & SMI_INT)
 
+#define MAX_MSG         256     // Max chara for SYSLOG 
+
+#ifdef DEBUG
+#define  DEBUG_PRINT(args)  debug_print args
+#else
+#define DEBUG_PRINT(args)
+#endif
+
 #endif	/* _SMBFS_SMBFS_H */

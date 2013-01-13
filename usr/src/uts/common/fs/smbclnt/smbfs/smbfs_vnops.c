@@ -74,6 +74,11 @@
 
 #include <sys/vmsystm.h>
 
+#ifdef SOL11
+#include <sys/vfs_opreg.h>
+#include <stdarg.h>
+#endif
+
 /*
  * We assign directory offsets like the NFS client, where the
  * offset increments by _one_ after each directory entry.
@@ -125,6 +130,7 @@ static int	smbfs_accessx(void *, int, cred_t *);
 static int	smbfs_readvdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 			caller_context_t *);
 static void	smbfs_rele_fid(smbnode_t *, struct smb_cred *);
+static void	debug_print(int , char *, ...);
 
 /*
  * These are the vnode ops routines which implement the vnode interface to
@@ -190,6 +196,14 @@ static int	smbfs_map(vnode_t *, offset_t, struct as *, caddr_t *, size_t,
 static int	smbfs_getpage(vnode_t *, offset_t, size_t, uint_t *, struct page **,
 			      size_t, struct seg *, caddr_t, enum seg_rw, cred_t *, caller_context_t *);
 static int	smbfs_putpage(vnode_t *, offset_t, size_t, int, cred_t *, caller_context_t *);
+static int	smbfs_addmap(vnode_t *, offset_t, struct as *, caddr_t ,
+                             size_t, uchar_t, uchar_t, uint_t, struct cred *, caller_context_t *);
+static int	smbfs_delmap(vnode_t *, offset_t, struct as *, caddr_t, size_t,
+                             uint_t, uint_t, uint_t, struct cred *, caller_context_t *);
+static int	smbfs_putapage(vnode_t *, page_t *, u_offset_t *, size_t *, int, struct cred *);
+static int	smbfs_getapage(vnode_t *, u_offset_t, size_t, uint_t *,
+			       page_t *[], size_t , struct seg *, caddr_t,
+			       enum seg_rw, struct cred *);
 
 /* Dummy function to use until correct function is ported in */
 int noop_vnodeop() {
@@ -234,8 +248,8 @@ const fs_operation_def_t smbfs_vnodeops_template[] = {
 	{ VOPNAME_GETPAGE,	{ .vop_getpage = smbfs_getpage } }, 
 	{ VOPNAME_PUTPAGE,	{ .vop_putpage = smbfs_putpage } }, 
 	{ VOPNAME_MAP,		{ .vop_map = smbfs_map } }, 
-	{ VOPNAME_ADDMAP,	{ .error = fs_nosys } }, /* smbfs_addmap, */
-	{ VOPNAME_DELMAP,	{ .error = fs_nosys } }, /* smbfs_delmap, */
+	{ VOPNAME_ADDMAP,	{ .vop_addmap = smbfs_addmap } }, 
+	{ VOPNAME_DELMAP,	{ .vop_delmap = smbfs_delmap } }, 
 	{ VOPNAME_DUMP,		{ .error = fs_nosys } }, /* smbfs_dump, */
 	{ VOPNAME_PATHCONF,	{ .vop_pathconf = smbfs_pathconf } },
 	{ VOPNAME_PAGEIO,	{ .error = fs_nosys } }, /* smbfs_pageio, */
@@ -594,7 +608,6 @@ static int
 smbfs_read(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	caller_context_t *ct)
 {
-	struct smb_cred scred;
 	struct vattr	va;
 	smbnode_t	*np;
 	smbmntinfo_t	*smi;
@@ -602,6 +615,12 @@ smbfs_read(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	offset_t	endoff;
 	ssize_t		past_eof;
 	int		error;
+        caddr_t		base = NULL; // kernel address mapped to vnode
+        offset_t	mapoff = 0; // offset until block boundary
+        offset_t	reloff = 0; // relative offset from block boundary
+        size_t		mapsz = 0; // map size
+        size_t		rest = 0; // difference between file size and current offset.
+        uint_t		flags = 0;        
 
 	np = VTOSMB(vp);
 	smi = VTOSMI(vp);
@@ -652,27 +671,99 @@ smbfs_read(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	} else
 		past_eof = 0;
 
-	/* Shared lock for n_fid use in smb_rwuio */
-	if (smbfs_rw_enter_sig(&np->r_lkserlock, RW_READER, SMBINTR(vp)))
-		return (EINTR);
-	smb_credinit(&scred, cr);
+        do {
+            /*
+             * relation between loffset/resid of uio structure and local variables
+             * (MAXBSIZE = 8192)
+             *   
+             *  | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE |
+             * -|----------|----------|----------|----------|----------|----------|
+             * ----------- File size -------------------------------------->|
+             * - uiop->loffset ----------->|<-- uiop->resid----->|
+             * -- mapoff ------------>|
+             *                        |<-->|<--->|
+             *                        reloff mapsz
+             *                             |<---------- rest -------------->|
+             *
+             * Need to call segmap_getmapflt several times to map until uiop->resid,
+             * because only 1 slot(=MAXBSIZE) can be mapped at a time.   
+             */
+            mapoff = uiop->uio_loffset & MAXBMASK;
+            reloff = uiop->uio_loffset & MAXBOFFSET;
+            mapsz = MAXBSIZE - reloff;
+            rest = va.va_size - uiop->uio_loffset;
+            /*
+             * Return if rest of size is loss than 0
+             */
+            if (rest <= 0){
+                DEBUG_PRINT((CE_CONT, "smbfs_read: rest(=%ld) less than equal zero\n", rest));            
+                break;
+            }
+        
+            /*
+             * set rest to mapsz, if mapsz is bigger than rest file size.
+             */
+            mapsz = MIN(mapsz, rest);
 
-	/* After reconnect, n_fid is invalid */
-	if (np->n_vcgenid != ssp->ss_vcgenid)
-		error = ESTALE;
-	else
-		error = smb_rwuio(ssp, np->n_fid, UIO_READ,
-		    uiop, &scred, smb_timo_read);
+            /*
+             * set resid to mapsz, if resid is smaller than mapsz
+             * (means, last mapping)
+             */
+            mapsz = MIN(mapsz, uiop->uio_resid);
 
-	smb_credrele(&scred);
-	smbfs_rw_exit(&np->r_lkserlock);
+            DEBUG_PRINT((CE_CONT, "smbfs_read: uiop->uio_loffset=%" PRId64 "\n", uiop->uio_loffset));
+            DEBUG_PRINT((CE_CONT, "smbfs_read: uiop->uio_resid=%ld\n", uiop->uio_resid));
+            DEBUG_PRINT((CE_CONT, "smbfs_read: mapoff=%" PRId64 "\n", mapoff));
+            DEBUG_PRINT((CE_CONT, "smbfs_read: reloff=%" PRId64 "\n", reloff));
+            DEBUG_PRINT((CE_CONT, "smbfs_read: mapsz=%ld\n", mapsz));
 
+            /*
+             * map between specified file area and kernel address space.
+             * By setting 5th argument(=forcefault) of segmap_getmapflt to 1,
+             * page fault will happen within segmap_getmapflt itself.
+             * If set to 0, page fault will happen when uiomove is called.
+             * As a result, smbfs_getpage will be called.
+             * Return value is address of kernel space address.
+             */
+            DEBUG_PRINT((CE_CONT, "smbfs_read: calling segmap_getmapflt\n"));
+            base = segmap_getmapflt(segkmap, vp, mapoff + reloff, mapsz, 0, S_READ);
+            if (base == NULL) {
+                cmn_err(CE_WARN, "smbfs_read: segmap_getmapflt failed\n");
+                error = ENOMEM;
+                break;
+            }
+            DEBUG_PRINT((CE_CONT, "smbfs_read: segmap_getmapflt succeeded \n"));
+
+            /*
+             * copy read data to user space.
+             * If pagefault happen, VOP_GETPAGE operation will be called.
+             */
+            DEBUG_PRINT((CE_CONT, "smbfs_read: calling uiomove\n"));
+            error = uiomove(base + reloff, mapsz, UIO_READ, uiop);
+            if (error != 0) {
+                cmn_err(CE_WARN, "smbfs_read: uiomove failed (%d)\n", error);
+                break;
+            }
+            DEBUG_PRINT((CE_CONT, "smbfs_read: copyout %ld bytes of data \n", mapsz));
+
+            /*
+             * release mapping. MAXBSIZE-size slot is added to free list
+             */
+            error = segmap_release(segkmap, base, flags);
+            if (error != 0) {
+                DEBUG_PRINT((CE_CONT, "smbfs_read: segmap_release failed (%d)\n", error));
+                break;
+            }
+
+            DEBUG_PRINT((CE_CONT, "smbfs_read: segmap_release succeeded \n"));
+
+        } while (uiop->uio_resid > 0);
+    
 	/* undo adjustment of resid */
 	uiop->uio_resid += past_eof;
 
 	return (error);
 }
-
 
 /* ARGSUSED */
 static int
@@ -686,7 +777,21 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	smb_share_t	*ssp;
 	offset_t	endoff, limit;
 	ssize_t		past_limit;
-	int		error, timo;
+	int		error;
+	offset_t	mapoff = 0; // offset until block boundary
+	offset_t	reloff = 0; // relative offset from block boundary
+	size_t		 mapsz = 0; // map size
+	offset_t	off = 0;   // offset before uiomove
+	offset_t	wsize = 0; // write size by uiomove
+	offset_t	poff = 0;  // offset until page boundary
+	offset_t	preloff = 0; // relative offset from page boundary
+	size_t		maprest = 0; // size that is not yet uiomove'ed within map size.
+	size_t		psz = 0; // requested size within page
+	caddr_t		uiomvbase = NULL; // address to be uiomove'ed
+	caddr_t		base = NULL; // address of kernel address space that mapped to vnode
+	int		pagecreated = 0; // if new page created
+	int		pagecreateva = 0; // if new page created using page_create_va()
+	uint_t		flags = 0;
 
 	np = VTOSMB(vp);
 	smi = VTOSMI(vp);
@@ -754,37 +859,208 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
 	} else
 		past_limit = 0;
 
-	/* Timeout: longer for append. */
-	timo = smb_timo_write;
-	if (endoff > np->r_size)
-		timo = smb_timo_append;
+        /* moved code which calls smb_rwuio function to smbfs_putapage */
 
-	/* Shared lock for n_fid use in smb_rwuio */
-	if (smbfs_rw_enter_sig(&np->r_lkserlock, RW_READER, SMBINTR(vp)))
-		return (EINTR);
-	smb_credinit(&scred, cr);
+        do {
+            /*
+             * relation between loffset/resid of uio structure and local variables
+             * (MAXBSIZE = 8192)
+             *   
+             *   | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE | MAXBSIZE 
+             *  -|----------|----------|----------|----------|----------|----------
+             *  -----File size ----------------------------------------------->|
+             *  ------------ uiop->loffset ----------->|<-- uiop->resid--->|
+             *  ------------- mapoff ------------>|
+             *                                    |<-->|<--->|
+             *                                    reloff mapszx
+             *
+             * may need to call segmap_getmapflt several times to map until uiop->resid,
+             * because only 1 slot(=MAXBSIZE) can be mapped at a time.
+             */
+            /*
+             * NOTE: multiple of PAGESIZE : uiop->loffset & ~(PAGESIZE - 1)。
+             */
+            if (uiop->uio_loffset > np->r_size) {
+                DEBUG_PRINT((CE_CONT, "smbfs_write: offset(%" PRId64 ") exceeds file size(%ld)\n", uiop->uio_loffset, np->r_size));
+            }
 
-	/* After reconnect, n_fid is invalid */
-	if (np->n_vcgenid != ssp->ss_vcgenid)
-		error = ESTALE;
-	else
-		error = smb_rwuio(ssp, np->n_fid, UIO_WRITE,
-		    uiop, &scred, timo);
+            mapoff = uiop->uio_loffset & MAXBMASK;
+            reloff = uiop->uio_loffset & MAXBOFFSET;
+            mapsz = MAXBSIZE - reloff;
 
-	if (error == 0) {
-		mutex_enter(&np->r_statelock);
-		np->n_flag |= (NFLUSHWIRE | NATTRCHANGED);
-		if (uiop->uio_loffset > (offset_t)np->r_size)
-			np->r_size = (len_t)uiop->uio_loffset;
-		mutex_exit(&np->r_statelock);
-		if (ioflag & (FSYNC|FDSYNC)) {
-			/* Don't error the I/O if this fails. */
-			(void) smbfs_smb_flush(np, &scred);
-		}
-	}
+            /*
+             * set resid to mapsz, if resid is smaller than mapsz
+             * (means, last mapping)
+             */
+            mapsz = MIN(mapsz, uiop->uio_resid);
+            DEBUG_PRINT((CE_CONT, "smbfs_write: uio_loffset=%" PRId64 "\n", uiop->uio_loffset));
+            DEBUG_PRINT((CE_CONT, "smbfs_write: uio_resid=%ld\n", uiop->uio_resid));
+            DEBUG_PRINT((CE_CONT, "smbfs_write: mapoff=%" PRId64 "\n", mapoff));
+            DEBUG_PRINT((CE_CONT, "smbfs_write: reloff=%" PRId64 "\n", reloff));
+            DEBUG_PRINT((CE_CONT, "smbfs_write: mapsz=%ld\n", mapsz));
 
-	smb_credrele(&scred);
-	smbfs_rw_exit(&np->r_lkserlock);
+            /*
+             * map between specified file area and kernel address space.
+             * by setting 5th argument(=forcefault) of segmap_getmapflt to 1,
+             * page fault will happen within segmap_getmapflt.
+             * If set to 0, page fault will happen within uiomove.
+             * As a result, smbfs_getpage will be called.
+             * Return value is address of kernel space address.
+             */            
+            DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_getmapflt\n"));
+            base = segmap_getmapflt(segkmap, vp, mapoff + reloff, mapsz, 0, S_WRITE); 
+            if (base == NULL) {
+                cmn_err(CE_WARN, "smbfs_write: segmap_getmapflt failed\n");
+                error = ENOMEM;
+                break;
+            }
+            DEBUG_PRINT((CE_CONT, "smbfs_write: segmap_getmapflt succeeded \n"));
+
+            /*
+             * Call uiomove every PAGESIZE
+             * 
+             * -------|-----------------------------MAXBSIZE--------------------|
+             * -------|-------PAGESIZE----|----PAGESIZE-----|-----PAGESIZE------|
+             * -poff->|       
+             *        |<-preloff->|<-psz->|
+             *                    |<--------- mapreset ----------->|
+             */
+
+            /*
+             * base must be multiples of MAXBSIZE.
+             * Add offset value(=reloff) to base.
+             */
+            uiomvbase = base + reloff;
+            maprest = mapsz;
+            while (maprest > 0) {
+                off = uiop->uio_loffset;
+                preloff = uiop->uio_loffset & PAGEOFFSET;
+                poff = uiop->uio_loffset & PAGEMASK; 
+                psz = PAGESIZE - preloff;
+                psz = MIN(psz, maprest);
+                pagecreated = 0;
+                pagecreateva = 0;
+
+                DEBUG_PRINT((CE_CONT, "smbfs_write: uiop->uio_loffset=%" PRId64 ",preloff=% " PRId64 "\n", uiop->uio_loffset, preloff));
+                DEBUG_PRINT((CE_CONT, "smbfs_write: maprest=%ld\n", maprest));
+                DEBUG_PRINT((CE_CONT, "smbfs_write: poff=%" PRId64 "\n", poff));
+                DEBUG_PRINT((CE_CONT, "smbfs_write: psz=%ld\n", psz));
+
+                /*
+                 * Create new page if:
+                 * 1) offset value of page boundary is greater than file size
+                 *    (means, requested a data of page that doesn't exist)
+                 * 2) offset is 0, and size is page size or offset+size is
+                 *    greater than file size.
+                 *    (means, no need to read existing data)
+                 * 3) file size is 0
+                 */
+                if (np->r_size == 0 ||
+                    (poff > np->r_size) ||
+                    (preloff == 0 && (psz == PAGESIZE ||
+                                      (uiop->uio_loffset + psz > np->r_size)))) {
+                    DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_pagecreate\n"));
+
+#ifdef FORCE_LOCK_ON_PAGECREATE
+                    /*
+                     * set 1 to last args so that acquire the lock, then
+                     * unlock in segmap_fault. Othewise, fail in somecase..
+                     * This will unlock a page which is allocated by page_create_va(),
+                     * so don't need to call segmap_pageunlock.
+                     */
+                    pagecreateva = segmap_pagecreate(segkmap, uiomvbase, psz, 1);                
+#else                
+                    pagecreateva = segmap_pagecreate(segkmap, uiomvbase, psz, 0);
+#endif
+                    pagecreated = 1;                
+                    DEBUG_PRINT((CE_CONT, "smbfs_write: new page created\n"));
+                }
+                /*
+                 * copy data on user space to mapped address.
+                 * If pagefault happens, VOP_GETPAGE(smbfs_getpage) is called
+                 * and it requests nsmb driver to get data.
+                 * In case uiomove fails, release map and invalidate all pages.
+                 */
+                DEBUG_PRINT((CE_CONT, "smbfs_write: calling uiomove\n"));
+                if((error = uiomove(uiomvbase, psz, UIO_WRITE, uiop))){
+                    cmn_err(CE_WARN, "smbfs_write: uiomove failed (%d)\n", error);
+                    DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_release with SM_INVAL\n"));
+                    segmap_release(segkmap, base, SM_INVAL);
+                    break;
+                }
+                wsize = uiop->uio_loffset - off;
+                DEBUG_PRINT((CE_CONT, "smbfs_write: copyin %ld bytes of data \n", wsize));
+
+                /*
+                 * fill 0 to non-used area of newly created page
+                 */
+                if (pagecreated) {
+                    if (uiop->uio_loffset & PAGEOFFSET || wsize == 0) {
+                        if(wsize > PAGESIZE){
+                            cmn_err(CE_WARN, "smbfs_write: copyin size(%llu) is larger than pagesize\n", wsize);
+                        } else {
+                            (void) kzero(uiomvbase + wsize, PAGESIZE - (preloff + wsize));
+                        }
+                    }
+#ifdef FORCE_LOCK_ON_PAGECREATE
+                    /* unlock by segmap_fault */
+                    DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_fault\n"));
+                    err = segmap_fault(kas.a_hat, segkmap, uiomvbase, wsize,
+                                       F_SOFTUNLOCK, S_WRITE);
+                    if (err != 0) {
+                        cmn_err(CE_WARN, "smbfs_write: segmap_fault failed (%d)\n", error);
+                        DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_release with SM_INVAL\n"));
+                        segmap_release(segkmap, base, SM_INVAL);                
+                        break;
+                    }
+#else            
+                    if (pagecreateva) {                
+                        /* need to unlock if page was created by page_create_va() */
+                        segmap_pageunlock(segkmap, uiomvbase,  wsize, S_WRITE);
+                    }
+#endif
+                }
+            
+                maprest -= wsize;
+                uiomvbase += wsize;
+                /*
+                 * changes file size value which smbfsnode has.
+                 * so that smbfs_putapage can recognize the limit of the size
+                 * that can write data. (never exeed the file size)
+                 * Otherwise, file size becomes muliples of PAGESIZE, thus tail
+                 * of file will have garbage.
+                 *
+                 * TODO: Consider if here's right point to change file size.
+                 */
+                mutex_enter(&np->r_statelock);
+                np->n_flag |= (NFLUSHWIRE | NATTRCHANGED);
+                if (uiop->uio_loffset > (offset_t)np->r_size){
+                    np->r_size = (len_t)uiop->uio_loffset;
+                    DEBUG_PRINT((CE_CONT, "smbfs_write: file size is changed to %ld\n", np->r_size));
+                }
+                mutex_exit(&np->r_statelock);
+                if (ioflag & (FSYNC|FDSYNC)) {
+                    /* Don't error the I/O if this fails. */
+                    (void) smbfs_smb_flush(np, &scred);
+                }
+            }
+
+            /*
+             * Release mapping. It will be added to free list.
+             * Set SM_WRITE flag, so that force write back.
+             * segmap_release wont' be back until smbfs_putpage get completed.
+             * (Async write)
+             */
+            //flags |= SM_WRITE; // force write back
+            flags = 0;
+            DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_release\n"));        
+            error = segmap_release(segkmap, base, flags);
+            if (error != 0) {
+                DEBUG_PRINT((CE_CONT, "smbfs_write: segmap_release failed (%d)\n", error));
+                break;
+            }
+            DEBUG_PRINT((CE_CONT, "smbfs_write: segmap_release succeeded \n"));
+        } while (uiop->uio_resid > 0);
 
 	/* undo adjustment of resid */
 	uiop->uio_resid += past_limit;
@@ -3197,20 +3473,516 @@ smbfs_getpage(vnode_t *vp, offset_t off, size_t len, uint_t *protp,
         struct page **plarr, size_t plsz, struct seg *seg, caddr_t addr,
         enum seg_rw rw, cred_t *cr, caller_context_t *ct)
 {
-  SMBVDEBUG("smbfs_getpage called");
-  cmn_err(CE_CONT, "smbfs_getpage called");
-  return (ENOTSUP);
+    int error;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_getpage is called\n"));
+    DEBUG_PRINT((CE_CONT, "smbfs_getpage: vnode=%p", vp));
+    DEBUG_PRINT((CE_CONT, "smbfs_getpage: off=%" PRId64 ",len=%ld,plsz=%ld\n", off, len, plsz));
+
+    /*
+     * Set protection bits. If this it is not set, can't write page.
+     */ 
+    if (protp != NULL)
+        *protp = PROT_ALL;        
+
+    if (len <= PAGESIZE) {
+        error = smbfs_getapage(vp, off, len, protp, plarr, plsz, seg, addr, rw, cr);
+    } else {
+        error = pvn_getpages(smbfs_getapage, vp, off, len, protp, plarr, plsz, seg, addr, rw, cr);
+    }
+    DEBUG_PRINT((CE_CONT, "smbfs_getpage: return(%d)\n", error));
+    return (error);
+}
+
+/*
+ * smbfs_getapage
+ *
+ * local function.
+ * called by smbfs_getpage or pvn_getpages(), get a page regarding vnode.
+ */
+int
+smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
+        page_t *plarr[], size_t plsz, struct seg *seg, caddr_t addr,
+        enum seg_rw rw, struct cred *cr)
+{
+    page_t *pp = NULL;
+    size_t io_len;
+    u_offset_t io_off;
+    int error = 0;
+    struct buf *bp = NULL;
+    struct uio uio;
+    struct iovec iov;
+    smbnode_t	*np;    
+    smb_share_t	*ssp;
+    smbmntinfo_t *smi;    
+    struct smb_cred scred;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_getapage is called\n"));
+    DEBUG_PRINT((CE_CONT, "smbfs_getapage: vnode=%p", vp));
+    DEBUG_PRINT((CE_CONT, "smbfs_getapage: off=%" PRId64 ",len=%ld,plsz=%ld\n", off, len, plsz));
+
+    np = VTOSMB(vp);
+    smi = VTOSMI(vp);    
+    ssp = smi->smi_share;    
+
+    if (plarr == NULL) {
+        DEBUG_PRINT((CE_CONT, "smbfs_getapage: plarr is NULL\n"));
+        DEBUG_PRINT((CE_CONT, "smbfs_getapage: return(0)\n"));
+        return (0);
+    }
+    plarr[0] = NULL;
+
+    do {
+        error = 0;
+        bp = NULL;
+        pp = NULL;
+
+        /*
+         * Check if page exists within page cache.
+         * Set plarr if exist.
+         *  MEMO: page_exists() call does existance check witout lock
+         *        page_lookup() call retrun page after aquiring lock
+         */
+        if (page_exists(vp, off)) {
+            DEBUG_PRINT((CE_CONT, "smbfs_getapage: page exits\n"));
+            /*
+             * rw == S_CREATE means it creation time, so acquire exclusive lock.
+             * Othewize get shared lock
+             */ 
+            pp = page_lookup(vp, off, rw == S_CREATE ? SE_EXCL : SE_SHARED);
+            if (pp == NULL) {
+                // might get gone already. restat from the begining
+                continue; 
+            }
+            DEBUG_PRINT((CE_CONT, "smbfs_getapage: page found in cache\n"));
+            plarr[0] = pp;
+            plarr[1] = NULL;
+            // Found and got existing page.
+            break; 
+        }
+        
+        DEBUG_PRINT((CE_CONT, "smbfs_getapage: page not found in cache\n"));
+
+        /*
+         * Find contiguous pages that starts from addr whose offset and size
+         * meets vnode.
+         * It looks for contiguous pages which contains address specified in
+         * 3rd argument up to 7th arguments, and read it from disk.
+         * In this implementation, 7th arg is PAGESIZE, so io_len won't
+         * be beyond PAGESIZE. But it would be efficient that it is same
+         * as filesystem's block size, means network transmission size.
+         *
+         * TODO: 7th arg be block size of filesystem.
+         */
+        pp = pvn_read_kluster(vp, off, seg, addr, &io_off, &io_len, off,
+                PAGESIZE, 0);
+
+        /*
+         * pvn_read_kluster returned with NULL. it could means some other
+         * thread alreay refering that page. restart from the begginning
+         */
+        if (pp == NULL) {
+            DEBUG_PRINT((CE_CONT, "smbfs_getapage: pvn_read_kluster returned NULL, try lookup again.."));
+            continue;
+        }
+        DEBUG_PRINT((CE_CONT, "smbfs_getapage: pvn_read_kluster succeeded io_off=%" PRId64 ",io_len=%ld\n", io_off, io_len));
+
+        /*
+         * round up read size to multiple of PAGESIZE
+         */
+        io_len = ptob(btopr(io_len));
+        DEBUG_PRINT((CE_CONT, "smbfs_getapage: ptob(btopr(io_len)) = %ld\n", io_len));
+
+        /*
+         * assign and initialize buf structure. 
+         *   ..bp->b_bcount = io_len;
+         *   ..bp->b_bufsize = io_len;
+         *   ..bp->b_vp = vp など。
+         */
+        bp = pageio_setup(pp, io_len, vp, B_READ);
+
+        /*
+         * convert from block(DEV_BSIZE) to bytes. 
+         */
+        bp->b_lblkno = lbtodb(io_off); // devide by 512?
+        bp->b_dev = 0;
+        bp->b_edev = 0;
+
+        /*
+         * makes buffer data  accessible to a driver by mapping
+         * the data into a contiguous kernel virtual address region.
+         * The mapped  buffer is accessible via the bp->b_un.b_addr
+         * field  of the buf(9S) structure.
+         */
+        bp_mapin(bp);
+
+        /*
+         * initialize iov and uio structure.
+         */
+        iov.iov_base = bp->b_un.b_addr;
+        iov.iov_len = bp->b_bcount;
+        uio.uio_iov = &iov;
+        uio.uio_iovcnt = 1;
+        uio.uio_loffset = 0;
+        uio.uio_segflg = UIO_SYSSPACE;
+        uio.uio_resid = bp->b_bcount;
+        uio.uio_fmode = 0;
+        uio.uio_extflg = UIO_COPY_CACHED;        
+
+        /* Shared lock for n_fid use in smb_rwuio */
+        if (smbfs_rw_enter_sig(&np->r_lkserlock, RW_READER, SMBINTR(vp))){
+            error = EINTR;
+            break;
+        }
+
+        smb_credinit(&scred, cr);
+
+        /* After reconnect, n_fid is invalid */
+        if (np->n_vcgenid != ssp->ss_vcgenid){
+            error = ESTALE;
+        } else {
+            /*
+             * submit read request to smb driver
+             */        
+            error = smb_rwuio(ssp, np->n_fid, UIO_READ,
+                              &uio, &scred, smb_timo_read);
+        }
+
+        smb_credrele(&scred);
+        smbfs_rw_exit(&np->r_lkserlock);
+        
+        if(error)
+            break;
+
+        /*
+         * man bp_mapout(9F)
+         */
+        bp_mapout(bp);
+        pageio_done(bp);
+
+        if (error)
+            break;
+
+        /*
+         *  release iolock of page, and set shared lock instead.
+         */
+        pvn_plist_init(pp, plarr, plsz, off, io_len, rw);
+        break;
+    } while (1);
+
+    /*
+     * in normal case, pvn_read_done is called by pageio_done.
+     * So need to call it only if error happened.
+     */
+    if (error && (pp != NULL))
+        pvn_read_done(pp, B_ERROR);
+    
+    DEBUG_PRINT((CE_CONT, "smbfs_getapage: return(%d)\n", error));
+    return (error);
 }
 
 /* 
- * smbfs_putpage 
+ * smbfs_putpage
+ * 
  * PUTPAGE VNODE operation
  */
 int
 smbfs_putpage(vnode_t *vp, offset_t off, size_t len, int flags, cred_t *cr
 	      , caller_context_t *ct)
 {
-  SMBVDEBUG("smbfs_putpage called");
-  cmn_err(CE_CONT, "smbfs_putpage called");
-  return (ENOTSUP);
+    SMBVDEBUG("smbfs_putpage called");
+    cmn_err(CE_CONT, "smbfs_putpage called");
+    return (ENOTSUP);
+
+    u_offset_t preloff = 0; // relative offset within page
+    u_offset_t poff; // offset for loop operaton
+    size_t psz = 0; // requested size within page
+    size_t rest = 0;
+    int error = 0;
+    page_t *pp = NULL;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_putpage is called\n"));
+    DEBUG_PRINT((CE_CONT, "smbfs_putpage: vnode=%p", vp));
+    DEBUG_PRINT((CE_CONT, "smbfs_putpage: off=%" PRId64 ", len=%ld\n", off, len));
+
+    if (len == 0) {
+        DEBUG_PRINT((CE_CONT, "smbfs_putpage: calling pvn_vplist_dirty\n"));
+        if ((error = pvn_vplist_dirty(vp, off, smbfs_putapage, flags, cr))) {
+            cmn_err(CE_WARN, "smbfs_putpage: pvn_vplist_dirty failed (%d)\n", error);
+        }
+        if ((flags & B_INVAL) && vn_has_cached_data(vp)) {
+
+        }
+        DEBUG_PRINT((CE_CONT, "smbfs_putpage: pvn_vplist_dirty returned with (%d)\n", error));
+        goto out;
+    }
+
+    /*
+     * call smbfs_putapage every PAGESIZE
+     *
+     *  --|-------PAGESIZE--------|-------PAGESIZE------|-----PAGESIZE--------|
+     *  ------ poff ---->|
+     *    |<---preloff-->|<--psz->|
+     *                   |<--------------- rest ------------->|
+     */
+    rest = len;
+    poff = off;
+    while (error == 0 && off + len > poff) {
+        DEBUG_PRINT((CE_CONT, "smbfs_putpage: rest=%ld, poff=%" PRId64 "\n", rest, poff));
+        /*
+         * If not intend to invalidate page, use page_lookup_nowait to avoid
+         * getting page from freelist.
+         * If intend to invaludate page, acquire exclusive lock.
+         */
+        if (flags & (B_INVAL | B_FREE)) {
+            pp = page_lookup(vp, poff, SE_EXCL);
+        } else {
+            pp = page_lookup_nowait(vp, poff, SE_SHARED);
+        }
+
+        preloff = poff & PAGEOFFSET;
+        psz = PAGESIZE - preloff;
+        psz = MIN(psz, rest);
+
+        if (pp) {
+            if (pvn_getdirty(pp, flags) != 0) {
+                error = smbfs_putapage(vp, pp, &poff, &psz, flags, cr);
+            }
+        } else {
+            /*
+             * If page not found at offset, don't perform putpage,
+             * but move on to next page.
+             */
+            psz = PAGESIZE;
+        }
+        rest -= psz;
+        poff += psz;
+    }
+
+out:
+    DEBUG_PRINT((CE_CONT, "smbfs_putpage: return(%d)\n", error));
+    return (error);  
+}
+
+/*
+ * smbfs_putapage
+ *
+ * Local function. called by smbfs_putpage().
+ * Perform write operation per page.
+ * Eventually, it will ask nsmb driver to write data.
+ */
+int
+smbfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp, size_t *lenp,
+        int flags, struct cred *cr)
+{
+    size_t io_len = 0;
+    u_offset_t io_off = 0;
+    int error = 0, timo;
+    struct buf *bp = NULL;
+    struct uio uio;
+    struct iovec iov;
+    smbnode_t	*np;    
+    smb_share_t	*ssp;
+    smbmntinfo_t *smi;    
+    struct smb_cred scred;
+    offset_t endoff;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_putapage is called\n"));
+    DEBUG_PRINT((CE_CONT, "smbfs_putapage: vnode=%p", vp));
+
+    np = VTOSMB(vp);
+    smi = VTOSMI(vp);    
+    ssp = smi->smi_share;    
+
+    do {
+        /*
+         * Find the range of contiguous pages within the supplied address
+         * /length that fit within the provided vnode offset/length that
+         * do not already exist.
+         * io_off and io_len are return value, and are offset and length
+         * of contignous dirty pages coresponds to vnode.
+         * Now 6th arg is set to PAGESIZE, so io_len never beyond PAGESIZE.
+         */  
+        pp = pvn_write_kluster(vp, pp, &io_off, &io_len, pp->p_offset,
+                PAGESIZE * 8, flags);
+            
+        DEBUG_PRINT((CE_CONT, "smbfs_putapage: pvn_write_kluster succeeded io_off=%" PRId64 ",io_len=%ld\n", io_off, io_len));
+        /*
+         * Calculate and set proper write size.
+         * It won't write data beyond file size that was set within smbfs_write.
+         */
+        if (io_off + io_len > np->r_size) {
+            if(np->r_size < io_off){
+                /*
+                 * Offset already exceed the file size.
+                 */
+                io_off = np->r_size;
+                DEBUG_PRINT((CE_WARN, " smbfs_putapage: io_ff=%" PRId64 " greater than fsize=%" PRId64 "\n", io_off, np->r_size));
+            } 
+            io_len = np->r_size - io_off;
+            DEBUG_PRINT((CE_CONT, "smbfs_putapage: shorten io_len to %ld\n", io_len));
+        }
+        if(io_len <= 0) {
+            DEBUG_PRINT((CE_WARN, "smbfs_putapage: io_len <= 0\n"));
+            error = 0; //previously returned EINVAL..;
+            break;
+        }
+
+        /*
+         * assign and initialize buf structure. 
+         *   ..bp->b_bcount = io_len;
+         *   ..bp->b_bufsize = io_len;
+         *   ..bp->b_vp = vp など。
+         */
+        bp = pageio_setup(pp, io_len, vp, B_WRITE | flags);
+
+        /*
+         * convert from block(DEV_BSIZE) to bytes. 
+         */
+        bp->b_lblkno = lbtodb(io_off);// devide by 512?
+        bp->b_dev = 0;
+        bp->b_edev = 0;
+        bp->b_un.b_addr = 0;        
+
+        /*
+         * makes buffer data  accessible to a driver by mapping
+         * the data into a contiguous kernel virtual address region.
+         * The mapped  buffer is accessible via the bp->b_un.b_addr
+         * field  of the buf(9S) structure.
+         */        
+        bp_mapin(bp);
+
+        /*
+         * initialize iov and uio structure.
+         */
+        iov.iov_base = bp->b_un.b_addr;
+        iov.iov_len = bp->b_bcount;
+        uio.uio_iov = &iov;
+        uio.uio_iovcnt = 1;
+        uio.uio_loffset = 0;
+        uio.uio_segflg = UIO_SYSSPACE;
+        uio.uio_resid = bp->b_bcount;
+        uio.uio_fmode = 0;
+        uio.uio_extflg = UIO_COPY_CACHED;        
+
+	/* Timeout: longer for append. */
+	timo = smb_timo_write;
+	if (endoff > np->r_size)
+		timo = smb_timo_append;
+
+	/* Shared lock for n_fid use in smb_rwuio */
+	if (smbfs_rw_enter_sig(&np->r_lkserlock, RW_READER, SMBINTR(vp))){
+		return (EINTR);
+        }
+        
+	smb_credinit(&scred, cr);
+
+        /* After reconnect, n_fid is invalid */
+        if (np->n_vcgenid != ssp->ss_vcgenid){
+            error = ESTALE;
+        } else {
+            /*
+             * submit read request to smb driver
+             */
+            error = smb_rwuio(ssp, np->n_fid, UIO_WRITE,
+                              &uio, &scred, timo);
+        }        
+
+	if (error == 0) {
+		mutex_enter(&np->r_statelock);
+		np->n_flag |= (NFLUSHWIRE | NATTRCHANGED);
+		if ((&uio)->uio_loffset > (offset_t)np->r_size)
+		  np->r_size = (len_t)(&uio)->uio_loffset;
+		mutex_exit(&np->r_statelock);
+		/*
+		 * need to call smbfs_smb_flush here?
+		if (ioflag & (FSYNC|FDSYNC)) {
+			// Don't error the I/O if this fails. 
+			(void) smbfs_smb_flush(np, &scred);
+		}
+	        */
+	} 
+
+	smb_credrele(&scred);
+	smbfs_rw_exit(&np->r_lkserlock);
+
+        /*
+         * man bp_mapout(9F)
+         */
+        bp_mapout(bp);
+        pageio_done(bp);
+
+    } while (0);
+
+    /*
+     * Unlike read, we need to call pvn_write_doe by ourselves in case
+     * of async write. (In case of sync write, it is called within
+     * pageio_done automatically)
+     */
+    if (error) {
+        flags |= B_ERROR;
+    }
+    pvn_write_done(pp, flags | B_WRITE);
+
+    if (offp)
+        *offp = io_off;
+    if (lenp)
+        *lenp = io_len;
+
+    DEBUG_PRINT((CE_CONT, "smbfs_putapage: return(%d)\n", error));
+    return (error);
+}
+
+/*
+ * smbfs_addmap
+ * ADDMAP VNODE operation
+ */
+static int
+smbfs_addmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
+             size_t len, uchar_t prot, uchar_t maxprot, uint_t flags, struct cred *cr,
+             caller_context_t *ct)
+{
+    DEBUG_PRINT((CE_CONT, "smbfs_addmap is called\n"));    
+    if (vp->v_flag & VNOMAP){
+        return (ENOSYS);
+    }
+    return (0);    
+}
+
+/*
+ * smbfs_delmap
+ * DELMAP VNODE operation
+ */
+static int
+smbfs_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr, size_t len,
+             uint_t prot, uint_t maxprot, uint_t flags, struct cred *cr,
+             caller_context_t *ct)
+{
+    DEBUG_PRINT((CE_CONT, "smbfs_delmap is called\n"));    
+    if (vp->v_flag & VNOMAP){
+        cmn_err(CE_CONT, "smbfs_delmap: return ENOSYS \n");                    
+        return (ENOSYS);
+    }
+    return (0);        
+}
+
+/*
+ * bebug_print
+ *
+ * Debug outpu 
+ *
+ * Params:
+ *   level  : 
+ *   format : 
+ */
+void
+debug_print(int level, char *format, ...)
+{
+    va_list ap;
+    char buf[MAX_MSG];
+
+    va_start(ap, format);
+    vsprintf(buf, format, ap);
+    va_end(ap);
+    cmn_err(level, "%s", buf);
 }
