@@ -457,9 +457,19 @@ smbfs_close(vnode_t *vp, int flag, int count, offset_t offset, cred_t *cr,
 	smbnode_t	*np;
 	smbmntinfo_t	*smi;
 	struct smb_cred scred;
+        int		error;
 
 	np = VTOSMB(vp);
 	smi = VTOSMI(vp);
+
+        /*
+         * put all dirty pages, and dispose pages after that.
+         */ 
+        error = smbfs_putpage(vp, 0, 0, B_INVAL, cr, ct);
+        if(error){
+            cmn_err(CE_CONT, "smbfs_close: return(%d)\n", error);                
+            return error;
+        }
 
 	/*
 	 * Don't "bail out" for VFS_UNMOUNTED here,
@@ -1626,6 +1636,16 @@ smbfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 {
 	smbnode_t	*np;
 	struct smb_cred scred;
+        int		error;
+
+        /*
+         * put all dirty pages, and dispose pages after that.
+         */ 
+        error = smbfs_putpage(vp, 0, 0, B_INVAL, cr, ct);
+        if(error){
+            cmn_err(CE_CONT, "smbfs_close: smbfs_putpage failed with (%d)\n", error);
+            return;
+        }
 
 	/*
 	 * Don't "bail out" for VFS_UNMOUNTED here,
@@ -3430,35 +3450,35 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
         uchar_t prot, uchar_t maxprot, uint_t flags, cred_t *cr, caller_context_t *ct)
 {
     struct segvn_crargs vn_a;
-    int err;
+    int error;
 
     DEBUG_PRINT((CE_CONT, "smbfs_map is called\n"));    
 
     if (vp->v_flag & VNOMAP){
-        err = ENOSYS;
+        error = ENOSYS;
         goto out;
     }
  
     if (off < 0 || off + len < 0){
-        err = ENXIO;
+        error = ENXIO;
         goto out;
     }
  
     if (vp->v_type != VREG){
-        err = ENODEV;
+        error = ENODEV;
         goto out;
     }
  
     if (vp->v_flag & VNOCACHE) {
-        err = EAGAIN;
+        error = EAGAIN;
         goto out;
     }
  
     as_rangelock(as);
 #ifdef SOL11
     /* Solairs 10 doesn't have this kernel function */
-    err = choose_addr(as, addrp, len, off, ADDR_VACALIGN, flags);
-    if (err) {
+    error = choose_addr(as, addrp, len, off, ADDR_VACALIGN, flags);
+    if (error) {
         as_rangeunlock(as);
         goto out;
     }
@@ -3475,12 +3495,12 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
     vn_a.szc = 0;
     vn_a.lgrp_mem_policy_flags = 0;
 
-    err  = as_map(as, *addrp, len, segvn_create, &vn_a);
+    error  = as_map(as, *addrp, len, segvn_create, &vn_a);
     as_rangeunlock(as);
  
   out:
     DEBUG_PRINT((CE_CONT, "smbfs_map: return(%d)\n", error));        
-    return (err);
+    return (error);
 }
 
 /*
