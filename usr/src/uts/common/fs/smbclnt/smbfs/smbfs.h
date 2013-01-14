@@ -205,6 +205,14 @@ void	debug_print(int , char *, ...);
                 }       ptr;                                            \
                 model_t model;                                          \
         } handle = { { NULL }, DATAMODEL_ILP32 }
-#endif              
+#endif
+
+/*
+ * This kernel function is no longer exported, but exist for compatibility.
+ * We should use new sp_vnode function, but don't know which should be used
+ * instead.
+ * declare it here to avoid warning in compile time.
+ */
+int secpolicy_vnode_access2(const cred_t *, vnode_t *, uid_t, mode_t, mode_t);
 
 #endif	/* _SMBFS_SMBFS_H */
