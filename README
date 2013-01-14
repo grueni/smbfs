@@ -1,0 +1,4 @@
+This program is not tested well. It might cause system panic or hang.
+DON'T install this on production system. Use this at your own risk.
+
+See http://github.com/kaizawa/smbfs/wiki for more detail.
