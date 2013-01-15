@@ -3412,7 +3412,12 @@ smbfs_setsecattr(vnode_t *vp, vsecattr_t *vsa, int flag, cred_t *cr,
 	 * Allow only the mount owner to do this.
 	 * See comments at smbfs_access_rwx.
 	 */
+#ifdef SOL11_1
 	error = secpolicy_vnode_setdac_vp(cr, vp, smi->smi_uid);
+#else
+        error = secpolicy_vnode_setdac(cr, smi->smi_uid);
+#endif
+        
 	if (error != 0)
 		return (error);
 

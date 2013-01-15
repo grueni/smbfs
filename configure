@@ -3014,11 +3014,17 @@ fi
 
 MAJOR_VERSION=`uname -r | cut -f 1 -d .`
 MINOR_VERSION=`uname -r | cut -f 2 -d .`
+UPDATE_VERSION=`uname -v | cut -f 2 -d .`
 if test "$MAJOR_VERSION" -ge 5  -a "$MINOR_VERSION" -ge 11 ; then
+   if test "$UPDATE_VERSION" -eq 1 ; then
+	CFLAGS="$CFLAGS -DSOL11 -DSOL10 -DSOL11_1"
+   else
 	CFLAGS="$CFLAGS -DSOL11 -DSOL10"
+   fi
 else
 	CFLAGS="$CFLAGS -DSOL10"
 fi
+
 
 KCFLAGS="$CFLAGS $KCFLAGS -D_KERNEL -I. "
 

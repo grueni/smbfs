@@ -972,7 +972,11 @@ smbfs_mount_label_policy(vfs_t *vfsp, void *ipaddr, int addr_type, cred_t *cr)
 	 * TODO: don't know the meaning of last arg, since it didn't exists
          * in opensolaris
          */
-	tp = find_tpc(ipaddr, addr_type, B_FALSE, 0); 
+#ifdef SOL11_1
+	tp = find_tpc(ipaddr, addr_type, B_FALSE, 0);
+#else
+	tp = find_tpc(ipaddr, addr_type, B_FALSE);
+#endif
 	if (tp == NULL)
 		goto out;			/* error getting host entry */
 
