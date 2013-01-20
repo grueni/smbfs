@@ -1071,7 +1071,8 @@ smbfs_write(vnode_t *vp, struct uio *uiop, int ioflag, cred_t *cr,
              * segmap_release wont' be back until smbfs_putpage get completed.
              * (Async write)
              */
-            flags |= SM_WRITE; // force write back
+            //flags |= SM_WRITE; // force write back
+            flags = 0;
             DEBUG_PRINT((CE_CONT, "smbfs_write: calling segmap_release\n"));        
             error = segmap_release(segkmap, base, flags);
             if (error != 0) {
@@ -3675,6 +3676,7 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
 
         /* Shared lock for n_fid use in smb_rwuio */
         if (smbfs_rw_enter_sig(&np->r_lkserlock, RW_READER, SMBINTR(vp))){
+            DEBUG_PRINT((CE_CONT, "smbfs_getapage: smbfs_rw_enter_sig returns error\n"));            
             error = EINTR;
             break;
         }
@@ -3690,6 +3692,7 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
              */        
             error = smb_rwuio(ssp, np->n_fid, UIO_READ,
                               &uio, &scred, smb_timo_read);
+            DEBUG_PRINT((CE_CONT, "smbfs_getapage: smb_rwuio returns with %d\n", error));   
         }
 
         smb_credrele(&scred);
@@ -3704,9 +3707,6 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
         bp_mapout(bp);
         pageio_done(bp);
 
-        if (error)
-            break;
-
         /*
          *  release iolock of page, and set shared lock instead.
          */
@@ -3718,8 +3718,9 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
      * in normal case, pvn_read_done is called by pageio_done.
      * So need to call it only if error happened.
      */
-    if (error && (pp != NULL))
+    if (error && (pp != NULL)){
         pvn_read_done(pp, B_ERROR);
+    }
     
     DEBUG_PRINT((CE_CONT, "smbfs_getapage: return(%d)\n", error));
     return (error);
@@ -3991,11 +3992,14 @@ smbfs_addmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
              size_t len, uchar_t prot, uchar_t maxprot, uint_t flags, struct cred *cr,
              caller_context_t *ct)
 {
+    int error = 0;
+    
     DEBUG_PRINT((CE_CONT, "smbfs_addmap is called\n"));    
     if (vp->v_flag & VNOMAP){
-        return (ENOSYS);
+        error = ENOSYS;
     }
-    return (0);    
+    DEBUG_PRINT((CE_CONT, "smbfs_addmap: return(%d)\n", error));    
+    return (error);    
 }
 
 /*
@@ -4007,12 +4011,15 @@ smbfs_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr, size_t len,
              uint_t prot, uint_t maxprot, uint_t flags, struct cred *cr,
              caller_context_t *ct)
 {
+    int error;
+    
     DEBUG_PRINT((CE_CONT, "smbfs_delmap is called\n"));    
     if (vp->v_flag & VNOMAP){
         cmn_err(CE_CONT, "smbfs_delmap: return ENOSYS \n");                    
-        return (ENOSYS);
+        error = ENOSYS;
     }
-    return (0);        
+    DEBUG_PRINT((CE_CONT, "smbfs_delmap: return(%d)\n", error));    
+    return (error);        
 }
 
 #ifdef DEBUG
