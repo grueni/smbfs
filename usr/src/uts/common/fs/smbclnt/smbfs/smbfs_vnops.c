@@ -3692,7 +3692,7 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
              */        
             error = smb_rwuio(ssp, np->n_fid, UIO_READ,
                               &uio, &scred, smb_timo_read);
-            DEBUG_PRINT((CE_CONT, "smbfs_getapage: smb_rwuio returns with %d\n", error));   
+            cmn_err(CE_CONT, "smbfs_getapage: smb_rwuio returns with %d\n", error);   
         }
 
         smb_credrele(&scred);
@@ -4011,7 +4011,7 @@ smbfs_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr, size_t len,
              uint_t prot, uint_t maxprot, uint_t flags, struct cred *cr,
              caller_context_t *ct)
 {
-    int error;
+    int error = 0 ;
     
     DEBUG_PRINT((CE_CONT, "smbfs_delmap is called\n"));    
     if (vp->v_flag & VNOMAP){
