@@ -64,6 +64,8 @@ clean:
 
 distclean:
 	cd usr/src/uts/common/fs/smbclnt/smbfs ; make distclean
+	cd usr/src/uts/common/fs/smbclnt/netsmb ; make distclean
+	cd smbfs-test ; make distclean
 	-$(RM) -rf $(CONFIGURE_FILES)
 
 logclean:
