@@ -3692,14 +3692,15 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
              */        
             error = smb_rwuio(ssp, np->n_fid, UIO_READ,
                               &uio, &scred, smb_timo_read);
-            cmn_err(CE_CONT, "smbfs_getapage: smb_rwuio returns with %d\n", error);   
         }
 
         smb_credrele(&scred);
         smbfs_rw_exit(&np->r_lkserlock);
         
-        if(error)
+        if(error){
+            cmn_err(CE_CONT, "smbfs_getapage: smb_rwuio returns with %d\n", error);            
             break;
+        }
 
         /*
          * man bp_mapout(9F)
