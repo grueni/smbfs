@@ -3684,7 +3684,8 @@ smbfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
         smb_credinit(&scred, cr);
 
         /* After reconnect, n_fid is invalid */
-        if (np->n_vcgenid != ssp->ss_vcgenid){
+        if (np->n_vcgenid != ssp->ss_vcgenid
+            || 0xffff == np->n_fid){
             error = ESTALE;
         } else {
             /*
