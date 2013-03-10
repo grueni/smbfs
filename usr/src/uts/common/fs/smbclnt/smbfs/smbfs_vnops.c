@@ -389,7 +389,8 @@ smbfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 	if ((flag & FWRITE))
 		rights |= SA_RIGHT_FILE_WRITE_DATA |
 		    SA_RIGHT_FILE_APPEND_DATA |
-		    SA_RIGHT_FILE_WRITE_ATTRIBUTES;
+		    SA_RIGHT_FILE_WRITE_ATTRIBUTES|
+                    SA_RIGHT_FILE_READ_DATA;
 
 	bzero(&fa, sizeof (fa));
 	error = smbfs_smb_open(np,
@@ -3457,8 +3458,11 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
 {
     struct segvn_crargs vn_a;
     int error;
+    smbnode_t	*np;
 
-    DEBUG_PRINT((CE_CONT, "smbfs_map is called\n"));    
+    DEBUG_PRINT((CE_CONT, "smbfs_map is called\n"));
+
+    np = VTOSMB(vp);
 
     if (vp->v_flag & VNOMAP){
         error = ENOSYS;
@@ -3478,7 +3482,7 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
     if (vp->v_flag & VNOCACHE) {
         error = EAGAIN;
         goto out;
-    }
+    }    
  
     as_rangelock(as);
 #ifdef SOL11
@@ -3503,6 +3507,14 @@ smbfs_map (vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp, size_t len,
 
     error  = as_map(as, *addrp, len, segvn_create, &vn_a);
     as_rangeunlock(as);
+
+    /*
+     * Increment reference count of fid, so that fid won't
+     * be invalidated after file has been closed.
+     */    
+    mutex_enter(&np->r_statelock);    
+    np->n_fidrefs++;
+    mutex_exit(&np->r_statelock);    
  
   out:
     DEBUG_PRINT((CE_CONT, "smbfs_map: return(%d)\n", error));        
@@ -4013,12 +4025,23 @@ smbfs_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr, size_t len,
              caller_context_t *ct)
 {
     int error = 0 ;
+    smbnode_t	*np;
     
-    DEBUG_PRINT((CE_CONT, "smbfs_delmap is called\n"));    
+    DEBUG_PRINT((CE_CONT, "smbfs_delmap is called\n"));
+    np = VTOSMB(vp);
+    
     if (vp->v_flag & VNOMAP){
         cmn_err(CE_CONT, "smbfs_delmap: return ENOSYS \n");                    
         error = ENOSYS;
     }
+    
+    /*
+     * decrement reference count of fid
+     */    
+    mutex_enter(&np->r_statelock);    
+    np->n_fidrefs--;
+    mutex_exit(&np->r_statelock);
+    
     DEBUG_PRINT((CE_CONT, "smbfs_delmap: return(%d)\n", error));    
     return (error);        
 }
