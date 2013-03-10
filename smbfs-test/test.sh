@@ -225,7 +225,7 @@ main() {
 
     init
 
-    printf "Please enter SMB Server name and share name: "
+    printf "Please enter SMB Server name: "
     read servername
 
     printf "Please enter SMB share name: "
