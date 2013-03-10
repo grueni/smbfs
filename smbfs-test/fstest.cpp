@@ -382,6 +382,9 @@ Test::doMmap(const char *path, size_t size)
     }
     
     map = (uchar_t *)mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+    close(fd);
+    
     if (map == (uchar_t *)-1) {
         cout << "\t\tdoMmap: mmap(" << path << "): " << strerror(errno) << endl;
         free(buf);        
