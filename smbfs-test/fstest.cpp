@@ -710,9 +710,19 @@ RmdirTest::runTest()
         default:
             cout << "\terror is not ENOTEMPTY, but " <<  strerror(ret) << endl;
     }        
+
+    /*
+     * this is just cleanup operation
+     */
+    ret = doRemove(NEW_FILE_PATH_5);
+    ret = doRmdir(NEW_DIR_PATH_2);
+    if(ret != 0){
+        cout << "\tcannot cleanup test dir " << NEW_DIR_PATH_2 << endl;
+    }
+
     ret = 0;
-    cout << "\tend: Success" << endl;        
-    
+    cout << "\tend: Success" << endl;
+
 out:
     if (ret) {
         cout << "\tend: Failed" << endl;
