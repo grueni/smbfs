@@ -5,12 +5,10 @@
  */
 fbt:smbfs::entry
 {
-    @[probefunc] = count();
-    printf("tid=%d", tid);    
-
+    printf(" ");
 }
 
 fbt:smbfs::return
 {
-   printf("tid=%d", tid);  
+   printf("= %d", arg1);  
 }
